@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Balochistan Filter</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f8dce8;color:#5b1730;font-family:Arial,sans-serif;text-align:center}h1{margin:0 0 16px;padding:18px 8px;background:#5b1730;color:#f5d96b;letter-spacing:3px;font-size:clamp(24px,6vw,36px)}p{padding:0 18px}.camera-frame{position:relative;width:min(92vw,420px);aspect-ratio:3/4;margin:0 auto;overflow:hidden;border:5px solid #f5d96b;border-radius:18px;background:#222}canvas{display:block;width:100%;height:100%}button{margin:16px 6px;padding:12px 20px;border:0;border-radius:24px;background:#5b1730;color:white;font-size:16px;cursor:pointer}button:disabled{opacity:.55}#status{min-height:40px;font-size:14px}.note{max-width:440px;margin:0 auto 24px;font-size:12px;color:#684a56}
+</style>
+</head>
+<body>
+<h1>BALOCHISTAN</h1>
+<div class="camera-frame"><canvas id="screen" width="420" height="560"></canvas></div>
+<button id="start">Start Filter</button>
+<button id="stop" disabled>Stop Camera</button>
+<p id="status">Press Start Filter and allow camera access.</p>
+<p class="note">Camera processing happens in your browser. This is an experimental photo-style effect; alignment may vary by face and device.</p>
+<video id="video" playsinline muted style="display:none"></video>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+<script>
+const video=document.getElementById('video'), canvas=document.getElementById('screen'), ctx=canvas.getContext('2d');
+const statusText=document.getElementById('status'), startBtn=document.getElementById('start'), stopBtn=document.getElementById('stop');
+const bg=new Image(), outfit=new Image(), hand=new Image();
+bg.src='filter-background.jpg'; outfit.src='outfit-overlay.png'; hand.src='hand-overlay.png';
+let stream=null, segmenter=null, faceMesh=null, running=false, personCanvas=document.createElement('canvas'), personCtx=personCanvas.getContext('2d');
+personCanvas.width=canvas.width; personCanvas.height=canvas.height;
+let latestLandmarks=null, frameBusy=false;
+function drawEyeliner(points){
+  if(!points) return;
+  // Face Mesh eye landmark paths; coordinates are normalized to the mirrored camera preview.
+  const paths=[ [33,246,161,160,159,158,157,173,133], [362,398,384,385,386,387,388,466,263] ];
+  ctx.save(); ctx.fillStyle='#090609'; ctx.strokeStyle='#090609'; ctx.lineJoin='round';
+  for(const ids of paths){
+    const pts=ids.map(i=>({x:(1-points[i].x)*canvas.width,y:points[i].y*canvas.height}));
+    ctx.beginPath(); pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+    // create a bold eyeliner strip by tracing a second path just below the eyelid
+    for(let i=pts.length-1;i>=0;i--){const p=pts[i];ctx.lineTo(p.x,p.y+5)}
+    ctx.closePath();ctx.globalAlpha=.94;ctx.fill();
+    // Dramatic outer wing
+    const a=pts[0], b=pts[1]; ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(a.x+(a.x-b.x)*.8,a.y-2);ctx.lineTo(b.x,b.y+3);ctx.closePath();ctx.fill();
+  }
+  ctx.restore();
+}
+async function startFilter(){
+  try{
+    if(!navigator.mediaDevices?.getUserMedia) throw new Error('Camera needs HTTPS or localhost.');
+    startBtn.disabled=true; statusText.textContent='Requesting camera permission…';
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:720},height:{ideal:960}},audio:false});
+    video.srcObject=stream; await video.play();
+    segmenter=new SelfieSegmentation({locateFile:(file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`});
+    segmenter.setOptions({modelSelection:1});
+    segmenter.onResults(drawSegmented);
+    faceMesh=new FaceMesh({locateFile:(file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`});
+    faceMesh.setOptions({maxNumFaces:1,refineLandmarks:true,minDetectionConfidence:.5,minTrackingConfidence:.5});
+    faceMesh.onResults(results=>{latestLandmarks=results.multiFaceLandmarks?.[0]||null;});
+    running=true;stopBtn.disabled=false;statusText.textContent='Filter running. Face the camera and keep your head near the centre.';
+    processFrames();
+  }catch(err){console.error(err);statusText.textContent='Could not start camera: '+(err.message||'check camera permission and use HTTPS or localhost.');startBtn.disabled=false;}
+}
+async function processFrames(){
+  if(!running)return;
+  if(!frameBusy && video.readyState>=2){
+    frameBusy=true;
+    try{await Promise.all([segmenter.send({image:video}),faceMesh.send({image:video})]);}catch(e){console.error(e)}
+    frameBusy=false;
+  }
+  if(running) requestAnimationFrame(processFrames);
+}
+function drawSegmented(results){
+  const w=canvas.width,h=canvas.height;
+  ctx.clearRect(0,0,w,h);
+  // Fill the frame with the village photograph.
+  if(bg.complete && bg.naturalWidth){ctx.drawImage(bg,0,0,w,h)}else{ctx.fillStyle='#332b2a';ctx.fillRect(0,0,w,h)}
+  // Keep only the visitor from the live camera, over the village background.
+  personCtx.clearRect(0,0,w,h);
+  personCtx.save(); personCtx.translate(w,0); personCtx.scale(-1,1); personCtx.drawImage(results.image,0,0,w,h); personCtx.restore();
+  personCtx.globalCompositeOperation='destination-in';
+  personCtx.drawImage(results.segmentationMask,0,0,w,h);
+  personCtx.globalCompositeOperation='source-over';
+  ctx.drawImage(personCanvas,0,0,w,h);
+  // Eye makeup is attached to the tracked face. This is an approximation, not a full makeup simulation.
+  drawEyeliner(latestLandmarks);
+  // Outfit frame has a transparent face opening. It sits over the shoulders/head edges.
+  if(outfit.complete && outfit.naturalWidth) ctx.drawImage(outfit,0,0,w,h);
+  // Separate hand layer. Adjust these values if it sits too high/low on your phone.
+  if(hand.complete && hand.naturalWidth) ctx.drawImage(hand,w*0.015,h*0.565,w*0.48,h*0.42);
+}
+function stopFilter(){running=false; if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;startBtn.disabled=false;stopBtn.disabled=true;ctx.clearRect(0,0,canvas.width,canvas.height);statusText.textContent='Camera stopped. Press Start Filter to try again.';}
+startBtn.addEventListener('click',startFilter);stopBtn.addEventListener('click',stopFilter);
+</script>
+</body>
+</html>
