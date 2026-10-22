@@ -157,7 +157,7 @@
           drawCameraImage(ctx, video, true);
           drawEyeliner(latestLandmarks);
           if (outfit.complete && outfit.naturalWidth) ctx.drawImage(outfit, 0, 0, canvas.width, canvas.height);
-          if (hand.complete && hand.naturalWidth) ctx.drawImage(hand, canvas.width * .015, canvas.height * .565, canvas.width * .48, canvas.height * .42);
+          if (hand.complete && hand.naturalWidth) ctx.drawImage(hand, canvas.width * .12, canvas.height * .565, canvas.width * .48, canvas.height * .42);
         }
         requestAnimationFrame(drawPreview);
       }
@@ -196,7 +196,7 @@
         ctx.drawImage(personCanvas, 0, 0, width, height);
         if (outfit.complete && outfit.naturalWidth) ctx.drawImage(outfit, 0, 0, width, height);
         drawEyeliner(latestLandmarks);
-        if (hand.complete && hand.naturalWidth) ctx.drawImage(hand, width * .015, height * .565, width * .48, height * .42);
+        if (hand.complete && hand.naturalWidth) ctx.drawImage(hand, width * .12, height * .565, width * .48, height * .42);
       }
 
       function stopFilter() {
