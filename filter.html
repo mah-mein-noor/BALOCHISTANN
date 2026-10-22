@@ -1,93 +1,228 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Balochistan Filter</title>
-<style>
-*{box-sizing:border-box}body{margin:0;background:#f8dce8;color:#5b1730;font-family:Arial,sans-serif;text-align:center}h1{margin:0 0 16px;padding:18px 8px;background:#5b1730;color:#f5d96b;letter-spacing:3px;font-size:clamp(24px,6vw,36px)}p{padding:0 18px}.camera-frame{position:relative;width:min(92vw,420px);aspect-ratio:3/4;margin:0 auto;overflow:hidden;border:5px solid #f5d96b;border-radius:18px;background:#222}canvas{display:block;width:100%;height:100%}button{margin:16px 6px;padding:12px 20px;border:0;border-radius:24px;background:#5b1730;color:white;font-size:16px;cursor:pointer}button:disabled{opacity:.55}#status{min-height:40px;font-size:14px}.note{max-width:440px;margin:0 auto 24px;font-size:12px;color:#684a56}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baloch Heritage</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<h1>BALOCHISTAN</h1>
-<div class="camera-frame"><canvas id="screen" width="420" height="560"></canvas></div>
-<button id="start">Start Filter</button>
-<button id="stop" disabled>Stop Camera</button>
-<p id="status">Press Start Filter and allow camera access.</p>
-<p class="note">Camera processing happens in your browser. This is an experimental photo-style effect; alignment may vary by face and device.</p>
-<video id="video" playsinline muted style="display:none"></video>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
-<script>
-const video=document.getElementById('video'), canvas=document.getElementById('screen'), ctx=canvas.getContext('2d');
-const statusText=document.getElementById('status'), startBtn=document.getElementById('start'), stopBtn=document.getElementById('stop');
-const bg=new Image(), outfit=new Image(), hand=new Image();
-bg.src='filter-background.jpg'; outfit.src='outfit-overlay.png'; hand.src='hand-overlay.png';
-let stream=null, segmenter=null, faceMesh=null, running=false, personCanvas=document.createElement('canvas'), personCtx=personCanvas.getContext('2d');
-personCanvas.width=canvas.width; personCanvas.height=canvas.height;
-let latestLandmarks=null, frameBusy=false;
-function drawEyeliner(points){
-  if(!points) return;
-  // Face Mesh eye landmark paths; coordinates are normalized to the mirrored camera preview.
-  const paths=[ [33,246,161,160,159,158,157,173,133], [362,398,384,385,386,387,388,466,263] ];
-  ctx.save(); ctx.fillStyle='#090609'; ctx.strokeStyle='#090609'; ctx.lineJoin='round';
-  for(const ids of paths){
-    const pts=ids.map(i=>({x:(1-points[i].x)*canvas.width,y:points[i].y*canvas.height}));
-    ctx.beginPath(); pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
-    // create a bold eyeliner strip by tracing a second path just below the eyelid
-    for(let i=pts.length-1;i>=0;i--){const p=pts[i];ctx.lineTo(p.x,p.y+5)}
-    ctx.closePath();ctx.globalAlpha=.94;ctx.fill();
-    // Dramatic outer wing
-    const a=pts[0], b=pts[1]; ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(a.x+(a.x-b.x)*.8,a.y-2);ctx.lineTo(b.x,b.y+3);ctx.closePath();ctx.fill();
-  }
-  ctx.restore();
-}
-async function startFilter(){
-  try{
-    if(!navigator.mediaDevices?.getUserMedia) throw new Error('Camera needs HTTPS or localhost.');
-    startBtn.disabled=true; statusText.textContent='Requesting camera permission…';
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:720},height:{ideal:960}},audio:false});
-    video.srcObject=stream; await video.play();
-    segmenter=new SelfieSegmentation({locateFile:(file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`});
-    segmenter.setOptions({modelSelection:1});
-    segmenter.onResults(drawSegmented);
-    faceMesh=new FaceMesh({locateFile:(file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`});
-    faceMesh.setOptions({maxNumFaces:1,refineLandmarks:true,minDetectionConfidence:.5,minTrackingConfidence:.5});
-    faceMesh.onResults(results=>{latestLandmarks=results.multiFaceLandmarks?.[0]||null;});
-    running=true;stopBtn.disabled=false;statusText.textContent='Filter running. Face the camera and keep your head near the centre.';
-    processFrames();
-  }catch(err){console.error(err);statusText.textContent='Could not start camera: '+(err.message||'check camera permission and use HTTPS or localhost.');startBtn.disabled=false;}
-}
-async function processFrames(){
-  if(!running)return;
-  if(!frameBusy && video.readyState>=2){
-    frameBusy=true;
-    try{await Promise.all([segmenter.send({image:video}),faceMesh.send({image:video})]);}catch(e){console.error(e)}
-    frameBusy=false;
-  }
-  if(running) requestAnimationFrame(processFrames);
-}
-function drawSegmented(results){
-  const w=canvas.width,h=canvas.height;
-  ctx.clearRect(0,0,w,h);
-  // Fill the frame with the village photograph.
-  if(bg.complete && bg.naturalWidth){ctx.drawImage(bg,0,0,w,h)}else{ctx.fillStyle='#332b2a';ctx.fillRect(0,0,w,h)}
-  // Keep only the visitor from the live camera, over the village background.
-  personCtx.clearRect(0,0,w,h);
-  personCtx.save(); personCtx.translate(w,0); personCtx.scale(-1,1); personCtx.drawImage(results.image,0,0,w,h); personCtx.restore();
-  personCtx.globalCompositeOperation='destination-in';
-  personCtx.drawImage(results.segmentationMask,0,0,w,h);
-  personCtx.globalCompositeOperation='source-over';
-  ctx.drawImage(personCanvas,0,0,w,h);
-  // Eye makeup is attached to the tracked face. This is an approximation, not a full makeup simulation.
-  drawEyeliner(latestLandmarks);
-  // Outfit frame has a transparent face opening. It sits over the shoulders/head edges.
-  if(outfit.complete && outfit.naturalWidth) ctx.drawImage(outfit,0,0,w,h);
-  // Separate hand layer. Adjust these values if it sits too high/low on your phone.
-  if(hand.complete && hand.naturalWidth) ctx.drawImage(hand,w*0.015,h*0.565,w*0.48,h*0.42);
-}
-function stopFilter(){running=false; if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;startBtn.disabled=false;stopBtn.disabled=true;ctx.clearRect(0,0,canvas.width,canvas.height);statusText.textContent='Camera stopped. Press Start Filter to try again.';}
-startBtn.addEventListener('click',startFilter);stopBtn.addEventListener('click',stopFilter);
-</script>
+
+    <main id="home" class="pink-frame">
+        <section class="hero">
+        <div class="hero-content">
+          <h1>BALOCH HERITAGE</h1>
+          <div class="hero-action">
+            <p>Discover the heritage, culture, and beauty of Balochistan.</p>
+            <button id="open-filter" class="ajrak-button" type="button" lang="bal" dir="rtl" aria-controls="filter-page" aria-label="Try the virtual outfit filter">
+              <span class="ajrak-pattern" aria-hidden="true">✳ ◆ ✳ ◇ ✳ ◆ ✳</span>
+              <span class="balochi-text">تئی عکس گِرگ ءَ لوٹ اِنت؟</span>
+              <span class="filter-button-label" lang="en" dir="ltr">Try the outfit filter</span>
+              <span class="ajrak-pattern" aria-hidden="true">✳ ◇ ✳ ◆ ✳ ◇ ✳</span>
+            </button>
+          </div>
+        </div>
+        </section>
+    </main>
+    <main id="filter-page" class="filter-page" hidden>
+      <h2 class="filter-heading">Balochistan Heritage Filter</h2>
+      <p class="filter-intro">Start the camera to see yourself in the Balochi outfit.</p>
+      <div class="camera-frame"><canvas id="screen" width="420" height="560"></canvas></div>
+      <div class="filter-controls">
+        <button id="start">Start Filter</button>
+        <button id="stop" disabled>Stop Camera</button>
+        <button id="back-home">Back to Home</button>
+      </div>
+      <p id="status" role="status" aria-live="polite">Press Start Filter and allow camera access.</p>
+      <p class="filter-note">Camera processing happens in your browser. Camera access requires permission and a secure connection or localhost.</p>
+    </main>
+    <video id="video" playsinline muted hidden></video>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    <script>
+      const video = document.getElementById('video');
+      const canvas = document.getElementById('screen');
+      const ctx = canvas.getContext('2d');
+      const home = document.getElementById('home');
+      const filterPage = document.getElementById('filter-page');
+      const statusText = document.getElementById('status');
+      const startBtn = document.getElementById('start');
+      const stopBtn = document.getElementById('stop');
+      const filterBackground = new Image();
+      const outfit = new Image();
+      const hand = new Image();
+      filterBackground.src = 'filter-background.jpg';
+      outfit.src = 'outfit-overlay.png';
+      hand.src = 'hand-overlay.png';
+
+      let stream = null;
+      let segmenter = null;
+      let faceMesh = null;
+      let running = false;
+      let frameBusy = false;
+      let hasSegmentedFrame = false;
+      let latestLandmarks = null;
+      const personCanvas = document.createElement('canvas');
+      const personCtx = personCanvas.getContext('2d');
+      personCanvas.width = canvas.width;
+      personCanvas.height = canvas.height;
+
+      function drawEyeliner(points) {
+        if (!points) return;
+        const paths = [[33, 246, 161, 160, 159, 158, 157, 173, 133], [362, 398, 384, 385, 386, 387, 388, 466, 263]];
+        ctx.save();
+        ctx.fillStyle = '#090609';
+        ctx.strokeStyle = '#090609';
+        ctx.lineWidth = 4;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        for (const ids of paths) {
+          const pointsOnEye = ids.map(index => cameraPoint(points[index]));
+          ctx.beginPath();
+          pointsOnEye.forEach((point, index) => index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y));
+          ctx.stroke();
+          const first = pointsOnEye[0];
+          const second = pointsOnEye[1];
+          ctx.beginPath();
+          ctx.moveTo(first.x, first.y);
+          ctx.lineTo(first.x + (first.x - second.x) * 1.2, first.y + (first.y - second.y) * 1.2);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      function cameraPoint(point) {
+        const scale = Math.max(canvas.width / video.videoWidth, canvas.height / video.videoHeight);
+        const cropX = (video.videoWidth * scale - canvas.width) / 2;
+        const cropY = (video.videoHeight * scale - canvas.height) / 2;
+        return {
+          x: (1 - point.x) * video.videoWidth * scale - cropX,
+          y: point.y * video.videoHeight * scale - cropY
+        };
+      }
+
+      function drawCameraImage(context, image, mirror = false) {
+        const imageWidth = image.videoWidth || image.naturalWidth || image.width;
+        const imageHeight = image.videoHeight || image.naturalHeight || image.height;
+        if (!imageWidth || !imageHeight) return;
+        const scale = Math.max(canvas.width / imageWidth, canvas.height / imageHeight);
+        const drawWidth = imageWidth * scale;
+        const drawHeight = imageHeight * scale;
+        const x = (canvas.width - drawWidth) / 2;
+        const y = (canvas.height - drawHeight) / 2;
+        context.save();
+        if (mirror) {
+          context.translate(canvas.width, 0);
+          context.scale(-1, 1);
+        }
+        context.drawImage(image, x, y, drawWidth, drawHeight);
+        context.restore();
+      }
+
+      async function startFilter() {
+        try {
+          if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera requires HTTPS or localhost.');
+          startBtn.disabled = true;
+          statusText.textContent = 'Requesting camera permission...';
+          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 960 } }, audio: false });
+          video.srcObject = stream;
+          await video.play();
+
+          running = true;
+          hasSegmentedFrame = false;
+          stopBtn.disabled = false;
+          statusText.textContent = 'Camera on. Loading the outfit effect...';
+          drawPreview();
+
+          segmenter = new SelfieSegmentation({ locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}` });
+          segmenter.setOptions({ modelSelection: 1 });
+          segmenter.onResults(drawSegmented);
+          faceMesh = new FaceMesh({ locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}` });
+          faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: .5, minTrackingConfidence: .5 });
+          faceMesh.onResults(results => { latestLandmarks = results.multiFaceLandmarks?.[0] || null; });
+
+          processFrames();
+        } catch (error) {
+          console.error(error);
+          stopFilter();
+          statusText.textContent = `Could not start camera: ${error.message || 'check camera permission and use HTTPS or localhost.'}`;
+        }
+      }
+
+      function drawPreview() {
+        if (!running || hasSegmentedFrame) return;
+        if (video.readyState >= 2) {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          drawCameraImage(ctx, video, true);
+          drawEyeliner(latestLandmarks);
+          if (outfit.complete && outfit.naturalWidth) ctx.drawImage(outfit, 0, 0, canvas.width, canvas.height);
+          if (hand.complete && hand.naturalWidth) ctx.drawImage(hand, canvas.width * .015, canvas.height * .565, canvas.width * .48, canvas.height * .42);
+        }
+        requestAnimationFrame(drawPreview);
+      }
+
+      async function processFrames() {
+        if (!running) return;
+        if (!frameBusy && video.readyState >= 2) {
+          frameBusy = true;
+          try {
+            await faceMesh.send({ image: video });
+            await segmenter.send({ image: video });
+          } catch (error) {
+            console.error(error);
+          }
+          frameBusy = false;
+        }
+        if (running) requestAnimationFrame(processFrames);
+      }
+
+      function drawSegmented(results) {
+        if (!hasSegmentedFrame) {
+          hasSegmentedFrame = true;
+          statusText.textContent = 'Filter running. Face the camera and keep your head near the centre.';
+        }
+        const width = canvas.width;
+        const height = canvas.height;
+        ctx.clearRect(0, 0, width, height);
+        if (filterBackground.complete && filterBackground.naturalWidth) {
+          drawCameraImage(ctx, filterBackground);
+        }
+        personCtx.clearRect(0, 0, width, height);
+        drawCameraImage(personCtx, results.image, true);
+        personCtx.globalCompositeOperation = 'destination-in';
+        drawCameraImage(personCtx, results.segmentationMask, true);
+        personCtx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(personCanvas, 0, 0, width, height);
+        if (outfit.complete && outfit.naturalWidth) ctx.drawImage(outfit, 0, 0, width, height);
+        drawEyeliner(latestLandmarks);
+        if (hand.complete && hand.naturalWidth) ctx.drawImage(hand, width * .015, height * .565, width * .48, height * .42);
+      }
+
+      function stopFilter() {
+        running = false;
+        hasSegmentedFrame = false;
+        if (stream) stream.getTracks().forEach(track => track.stop());
+        stream = null;
+        video.srcObject = null;
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+
+      document.getElementById('open-filter').addEventListener('click', () => {
+        home.hidden = true;
+        filterPage.hidden = false;
+        document.body.classList.add('filter-open');
+      });
+      document.getElementById('back-home').addEventListener('click', () => {
+        if (running || stream) stopFilter();
+        filterPage.hidden = true;
+        home.hidden = false;
+        document.body.classList.remove('filter-open');
+      });
+      startBtn.addEventListener('click', startFilter);
+      stopBtn.addEventListener('click', stopFilter);
+    </script>
 </body>
 </html>
